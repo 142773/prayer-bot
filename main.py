@@ -9,13 +9,24 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters.callback_data import CallbackData
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from dotenv import load_dotenv
 import pytz
 
+# ==================== ЗАГРУЗКА ПЕРЕМЕННЫХ ОКРУЖЕНИЯ ====================
+load_dotenv()  # Загружает переменные из .env файла
+
 # ==================== НАСТРОЙКИ ====================
-API_TOKEN = os.getenv('API_TOKEN', '1770216492:AAEwIm93NcD-IKA2wYk5qTzUMERpHcJbtgE')
+API_TOKEN = os.getenv('API_TOKEN')  # Токен теперь берется из .env файла
 CSV_FILE = 'prayer_times_cherkessk.csv'
 SUBSCRIPTIONS_FILE = 'subscriptions.json'
 TIMEZONE = pytz.timezone('Europe/Moscow')
+
+# Русские названия месяцев
+MONTHS_RU = {
+    1: "Январь", 2: "Февраль", 3: "Март", 4: "Апрель",
+    5: "Май", 6: "Июнь", 7: "Июль", 8: "Август",
+    9: "Сентябрь", 10: "Октябрь", 11: "Ноябрь", 12: "Декабрь"
+}
 
 # ==================== ИНИЦИАЛИЗАЦИЯ ====================
 bot = Bot(token=API_TOKEN)
@@ -143,6 +154,19 @@ def format_prayer_times(times, date_obj=None):
     
     return formatted
 
+def format_month_prayer_times(times, day, month_name_ru):
+    """Форматирует время намазов для вывода в месяце"""
+    if not times:
+        return f"*{day:02d} {month_name_ru}*: Нет данных"
+    
+    return (f"*{day:02d} {month_name_ru}*: "
+            f"Фаджр `{times.get('Fajr', '--:--')}`, "
+            f"Восх `{times.get('Sunrise', '--:--')}`, "
+            f"Зухр `{times.get('Duhr', '--:--')}`, "
+            f"Аср `{times.get('Asr', '--:--')}`, "
+            f"Магриб `{times.get('Maghrib', '--:--')}`, "
+            f"Иша `{times.get('Isha', '--:--')}`")
+
 # ==================== СИСТЕМА УВЕДОМЛЕНИЙ ====================
 async def send_prayer_notification(prayer_name, prayer_time_str, prayer_data_today):
     """Отправляет уведомление о намазе"""
@@ -261,7 +285,6 @@ async def cmd_today(message: types.Message):
     else:
         await message.answer("❌ Данные на сегодня не найдены")
 
-# Обработчики для остальных команд (tomorrow, month, etc.)
 @dp.message(Command("tomorrow"))
 async def cmd_tomorrow(message: types.Message):
     tomorrow = datetime.now(TIMEZONE) + timedelta(days=1)
@@ -275,19 +298,26 @@ async def cmd_tomorrow(message: types.Message):
 
 @dp.message(Command("month"))
 async def cmd_month(message: types.Message):
+    """Расписание на месяц"""
     now = datetime.now(TIMEZONE)
-    month_name = now.strftime("%B")
+    month_name_ru = MONTHS_RU.get(now.month, now.strftime("%B"))
     month_data = []
     
     for day in range(1, 32):
         date_str = f"{day:02d}.{now.month:02d}"
         if date_str in prayer_data:
             times = prayer_data[date_str]
-            month_data.append(f"*{day:02d} {month_name}*: Фаджр `{times['Fajr']}`, Зухр `{times['Duhr']}`, Магриб `{times['Maghrib']}`")
+            month_data.append(format_month_prayer_times(times, day, month_name_ru))
     
     if month_data:
-        response = f"📅 *Расписание на {month_name} {now.year}*\n\n" + "\n".join(month_data[:15])
-        await message.answer(response, parse_mode="Markdown", reply_markup=get_main_keyboard())
+        # Разбиваем на части по 10 дней, чтобы не превысить лимит Telegram
+        chunks = [month_data[i:i+10] for i in range(0, len(month_data), 10)]
+        
+        for i, chunk in enumerate(chunks):
+            part_text = f" (Часть {i+1}/{len(chunks)})" if len(chunks) > 1 else ""
+            response = f"📅 *Расписание на {month_name_ru} {now.year}{part_text}*\n\n" + "\n".join(chunk)
+            await message.answer(response, parse_mode="Markdown", 
+                                 reply_markup=get_main_keyboard() if i == len(chunks)-1 else None)
     else:
         await message.answer("❌ Данные на этот месяц не найдены")
 
@@ -341,33 +371,46 @@ async def handle_callback(query: types.CallbackQuery, callback_data: PrayerCallb
     
     elif action == "month":
         now = datetime.now(TIMEZONE)
-        month_name = now.strftime("%B")
+        month_name_ru = MONTHS_RU.get(now.month, now.strftime("%B"))
         month_data = []
         
         for day in range(1, 32):
             date_str = f"{day:02d}.{now.month:02d}"
             if date_str in prayer_data:
                 times = prayer_data[date_str]
-                month_data.append(f"*{day:02d} {month_name}*: Фаджр `{times['Fajr']}`, Зухр `{times['Duhr']}`, Магриб `{times['Maghrib']}`")
+                month_data.append(format_month_prayer_times(times, day, month_name_ru))
         
         if month_data:
-            response = f"📅 *Расписание на {month_name} {now.year}*\n\n" + "\n".join(month_data[:10])
-            await query.message.edit_text(response, parse_mode="Markdown", reply_markup=get_main_keyboard())
+            # Разбиваем на части по 10 дней
+            chunks = [month_data[i:i+10] for i in range(0, len(month_data), 10)]
+            chunk = chunks[0]  # Для inline кнопок показываем только первую часть
+            response = f"📅 *Расписание на {month_name_ru} {now.year}*\n\n" + "\n".join(chunk)
+            
+            # Добавляем кнопки для навигации если частей больше одной
+            keyboard = get_main_keyboard()
+            if len(chunks) > 1:
+                # Можно добавить дополнительные кнопки для навигации по частям
+                pass
+                
+            await query.message.edit_text(response, parse_mode="Markdown", reply_markup=keyboard)
     
     elif action == "nextmonth":
         next_month = datetime.now(TIMEZONE) + timedelta(days=32)
         next_month = next_month.replace(day=1)
-        month_name = next_month.strftime("%B")
+        month_name_ru = MONTHS_RU.get(next_month.month, next_month.strftime("%B"))
         month_data = []
         
         for day in range(1, 32):
             date_str = f"{day:02d}.{next_month.month:02d}"
             if date_str in prayer_data:
                 times = prayer_data[date_str]
-                month_data.append(f"*{day:02d} {month_name}*: Фаджр `{times['Fajr']}`, Зухр `{times['Duhr']}`, Магриб `{times['Maghrib']}`")
+                month_data.append(format_month_prayer_times(times, day, month_name_ru))
         
         if month_data:
-            response = f"📅 *Расписание на {month_name} {next_month.year}*\n\n" + "\n".join(month_data[:10])
+            # Разбиваем на части по 10 дней
+            chunks = [month_data[i:i+10] for i in range(0, len(month_data), 10)]
+            chunk = chunks[0]  # Для inline кнопок показываем только первую часть
+            response = f"📅 *Расписание на {month_name_ru} {next_month.year}*\n\n" + "\n".join(chunk)
             await query.message.edit_text(response, parse_mode="Markdown", reply_markup=get_main_keyboard())
     
     elif action == "notify_on":
