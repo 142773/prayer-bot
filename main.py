@@ -39,14 +39,20 @@ MONTHS_RU = {
 # Названия намазов на русском
 PRAYER_NAMES = {
     'Fajr': 'Фаджр',
+    'Sunrise': 'Восх',
     'Duhr': 'Зухр', 
     'Asr': 'Аср',
-    'Maghrib': 'Магриб',
+    'Maghrib': 'Магр',
     'Isha': 'Иша'
 }
 
-# Порядок намазов
-PRAYER_ORDER = ['Fajr', 'Duhr', 'Asr', 'Maghrib', 'Isha']
+# Порядок намазов для вывода
+PRAYER_ORDER = ['Fajr', 'Sunrise', 'Duhr', 'Asr', 'Maghrib', 'Isha']
+# Порядок для детального вывода (день)
+DETAILED_PRAYER_ORDER = ['Fajr', 'Sunrise', 'Duhr', 'Asr', 'Maghrib', 'Isha', 'FirstThird', 'Midnight', 'LastThird']
+
+# Порядок намазов для временного расчета
+TIME_PRAYER_ORDER = ['Fajr', 'Duhr', 'Asr', 'Maghrib', 'Isha']
 
 # ==================== ИНИЦИАЛИЗАЦИЯ ====================
 bot = Bot(token=API_TOKEN)
@@ -56,7 +62,6 @@ scheduler = AsyncIOScheduler(timezone=TIMEZONE)
 # ==================== РАБОТА С ДАННЫМИ ====================
 prayer_data = {}
 subscribed_users = set()
-user_month_selection = {}  # Для хранения выбора месяца пользователем
 
 def load_prayer_data():
     """Загружает данные из CSV файла"""
@@ -116,12 +121,9 @@ def get_main_menu_keyboard():
     keyboard = types.ReplyKeyboardMarkup(
         keyboard=[
             [
-                types.KeyboardButton(text="📅 Сегодня"),
-                types.KeyboardButton(text="⏩ Завтра")
-            ],
-            [
-                types.KeyboardButton(text="📊 Месяц"),
-                types.KeyboardButton(text="📈 След. месяц")
+                types.KeyboardButton(text="🕐 Сегодня"),
+                types.KeyboardButton(text="⏩ Завтра"),
+                types.KeyboardButton(text="🗓️ Месяц")
             ],
             [
                 types.KeyboardButton(text="🔔 Вкл уведомления"),
@@ -171,47 +173,88 @@ def get_prayer_times(date_obj=None):
     return prayer_data.get(date_str, {})
 
 def format_prayer_times(times, date_obj=None):
-    """Форматирует время намазов для вывода"""
+    """Форматирует время намазов для вывода (один день)"""
     if not times:
         return "📭 Данные для этой даты не найдены"
     
     if date_obj is None:
         date_obj = datetime.now(TIMEZONE)
     
-    formatted = f"🕌 *Расписание намазов*\n"
-    formatted += f"📅 {date_obj.strftime('%d %B %Y')}\n"
-    formatted += f"📍 Черкесск (КЧР)\n\n"
+    # Названия для детального вывода
+    detailed_names = {
+        'Fajr': '🌄 Фаджр:',
+        'Sunrise': 'Восход:',
+        'Duhr': '☀️ Зухр:',
+        'Asr': '🌤 Аср:',
+        'Maghrib': '🌅 Магриб:',
+        'Isha': '🌙 Иша:',
+        'FirstThird': 'Треть ночи:',
+        'Midnight': 'Полночь:',
+        'LastThird': 'Последняя треть:'
+    }
     
-    prayers = [
-        ("🌄 *Фаджр*", times.get('Fajr', '--:--'), f"Восход: {times.get('Sunrise', '--:--')}"),
-        ("☀️ *Зухр*", times.get('Duhr', '--:--'), ""),
-        ("🌤 *Аср*", times.get('Asr', '--:--'), ""),
-        ("🌅 *Магриб*", times.get('Maghrib', '--:--'), ""),
-        ("🌙 *Иша*", times.get('Isha', '--:--'), 
-         f"1-я треть: {times.get('FirstThird', '--:--')}\n"
-         f"Полночь: {times.get('Midnight', '--:--')}\n"
-         f"Последняя треть: {times.get('LastThird', '--:--')}")
-    ]
+    # Формируем строки с выравниванием
+    lines = []
     
-    for name, time, extra in prayers:
-        formatted += f"{name}: `{time}`\n"
-        if extra:
-            formatted += f"{extra}\n"
+    # Заголовок
+    month_name_ru = MONTHS_RU.get(date_obj.month, date_obj.strftime("%B"))
+    lines.append(f"📅 {date_obj.day:02d} {month_name_ru}")
+    lines.append(f"📍 Черкесск (КЧР)")
+    lines.append("")
     
-    return formatted
+    # Находим максимальную длину названий для выравнивания
+    max_name_length = max(len(detailed_names[prayer]) for prayer in DETAILED_PRAYER_ORDER if prayer in detailed_names)
+    
+    # Добавляем времена намазов с выравниванием
+    for prayer in DETAILED_PRAYER_ORDER:
+        if prayer in detailed_names and prayer in times:
+            name = detailed_names[prayer]
+            time_str = times[prayer]
+            
+            # Выравниваем названия до одинаковой длины
+            aligned_name = name.ljust(max_name_length)
+            lines.append(f"{aligned_name} {time_str}")
+    
+    return "\n".join(lines)
 
-def format_month_prayer_times(times, day, month_name_ru):
-    """Форматирует время намазов для вывода в месяце"""
-    if not times:
-        return f"*{day:02d} {month_name_ru}*: Нет данных"
+def format_month_table(times_dict, month_num):
+    """Форматирует время намазов для вывода в виде таблицы на месяц"""
+    if not times_dict:
+        return "📭 Данные для этого месяца не найдены"
     
-    return (f"*{day:02d} {month_name_ru}*: "
-            f"Фаджр `{times.get('Fajr', '--:--')}`, "
-            f"Восх `{times.get('Sunrise', '--:--')}`, "
-            f"Зухр `{times.get('Duhr', '--:--')}`, "
-            f"Аср `{times.get('Asr', '--:--')}`, "
-            f"Магриб `{times.get('Maghrib', '--:--')}`, "
-            f"Иша `{times.get('Isha', '--:--')}`")
+    month_name_ru = MONTHS_RU.get(month_num, f"Месяц {month_num}")
+    
+    # Заголовок с названиями намазов
+    header = "Фаджр, Восх, Зухр, Аср, Магр, Иша"
+    
+    # Собираем строки для каждого дня
+    day_lines = []
+    
+    for day in range(1, 32):
+        date_str = f"{day:02d}.{month_num:02d}"
+        if date_str in times_dict:
+            times = times_dict[date_str]
+            
+            # Формируем строку времен для дня
+            time_parts = []
+            for prayer in PRAYER_ORDER:
+                if prayer in times:
+                    time_parts.append(times[prayer])
+                else:
+                    time_parts.append("--:--")
+            
+            time_str = ", ".join(time_parts)
+            
+            # Формируем строку дня
+            day_line = f"{day:02d}. {month_name_ru}:\n{time_str}"
+            day_lines.append(day_line)
+    
+    if not day_lines:
+        return f"❌ Нет данных для {month_name_ru}"
+    
+    # Объединяем все
+    result = header + "\n" + "\n".join(day_lines)
+    return result
 
 def get_current_prayer_status(times):
     """Возвращает информацию о текущем намазе: сколько прошло и сколько осталось"""
@@ -220,7 +263,7 @@ def get_current_prayer_status(times):
     
     # Создаем список времени намазов
     prayer_times = []
-    for prayer in PRAYER_ORDER:
+    for prayer in TIME_PRAYER_ORDER:
         if prayer in times and times[prayer] != '--:--':
             try:
                 hour, minute = map(int, times[prayer].split(':'))
@@ -322,7 +365,7 @@ async def send_prayer_notification(prayer_name, prayer_time_str, prayer_data_tod
             f"🕌 *Время намаза!*\n\n"
             f"🌙 *{prayer_name}* в `{prayer_time_str}`\n\n"
             f"🌜 *Времена ночи:*\n"
-            f"• 1-я треть: `{first_third}`\n"
+            f"• Треть ночи: `{first_third}`\n"
             f"• Полночь: `{midnight}`\n"
             f"• Последняя треть: `{last_third}`\n\n"
             f"Используйте это время для тахаджуд намаза!"
@@ -401,7 +444,7 @@ async def cmd_start(message: types.Message):
         "Я бот с расписанием намазов для Черкесска.\n\n"
         "✅ *Вы автоматически подписаны на уведомления!*\n"
         "⏰ Уведомления приходят в точное время намазов\n\n"
-        "*Используйте меню внизу:*👇"
+        "👇 *Используйте меню внизу:*"
     )
     
     await message.answer(
@@ -410,7 +453,7 @@ async def cmd_start(message: types.Message):
         reply_markup=get_main_menu_keyboard()
     )
 
-@dp.message(lambda message: message.text == "📅 Сегодня")
+@dp.message(lambda message: message.text == "🕐 Сегодня")
 async def handle_today_button(message: types.Message):
     """Обработка кнопки Сегодня"""
     today = datetime.now(TIMEZONE)
@@ -421,7 +464,7 @@ async def handle_today_button(message: types.Message):
         response = format_prayer_times(times, today)
         await message.answer(
             response, 
-            parse_mode="Markdown",
+            parse_mode=None,  # Без форматирования Markdown
             reply_markup=get_main_menu_keyboard()
         )
         
@@ -448,7 +491,7 @@ async def handle_tomorrow_button(message: types.Message):
         response = format_prayer_times(times, tomorrow)
         await message.answer(
             response, 
-            parse_mode="Markdown",
+            parse_mode=None,  # Без форматирования Markdown
             reply_markup=get_main_menu_keyboard()
         )
     else:
@@ -457,46 +500,14 @@ async def handle_tomorrow_button(message: types.Message):
             reply_markup=get_main_menu_keyboard()
         )
 
-@dp.message(lambda message: message.text == "📊 Месяц")
+@dp.message(lambda message: message.text == "🗓️ Месяц")
 async def handle_month_button(message: types.Message):
     """Обработка кнопки Месяц - показываем inline кнопки с месяцами"""
-    user_id = message.from_user.id
-    user_month_selection[user_id] = 'current'  # Для текущего выбора
-    
     await message.answer(
         "📅 *Выберите месяц:*",
         parse_mode="Markdown",
         reply_markup=get_months_keyboard()
     )
-
-@dp.message(lambda message: message.text == "📈 След. месяц")
-async def handle_nextmonth_button(message: types.Message):
-    """Обработка кнопки След. месяц"""
-    now = datetime.now(TIMEZONE)
-    next_month = now.replace(day=28) + timedelta(days=4)
-    next_month = next_month.replace(day=1)
-    
-    month_name_ru = MONTHS_RU.get(next_month.month, next_month.strftime("%B"))
-    month_data = []
-    
-    for day in range(1, 32):
-        date_str = f"{day:02d}.{next_month.month:02d}"
-        if date_str in prayer_data:
-            times = prayer_data[date_str]
-            month_data.append(format_month_prayer_times(times, day, month_name_ru))
-    
-    if month_data:
-        response = f"📅 *Расписание на {month_name_ru} {next_month.year}*\n\n" + "\n".join(month_data)
-        await message.answer(
-            response, 
-            parse_mode="Markdown",
-            reply_markup=get_main_menu_keyboard()
-        )
-    else:
-        await message.answer(
-            "❌ Данные на следующий месяц не найдены",
-            reply_markup=get_main_menu_keyboard()
-        )
 
 @dp.message(lambda message: message.text == "🔔 Вкл уведомления")
 async def handle_notify_on_button(message: types.Message):
@@ -528,6 +539,11 @@ async def handle_info_button(message: types.Message):
         "🕌 *Информация о боте*\n\n"
         "📍 *Местоположение:* Черкесск (КЧР)\n"
         "🌐 *Координаты:* 44.22333, 42.05778\n"
+        "📊 *Данные:* 2026 год\n"
+        "👤 *Составитель:* Muslims of the KCHR Region\n"
+        "📅 *Обновлено:* 10.01.2026\n\n"
+        "📞 *Контакты:* 142773@gmail.com\n"
+        "📝 *Примечание:* Allahu Akbar"
     )
     await message.answer(
         info_text, 
@@ -544,34 +560,28 @@ async def handle_refresh_button(message: types.Message):
 @dp.callback_query()
 async def handle_inline_buttons(callback: types.CallbackQuery):
     """Обработка inline кнопок с месяцами"""
-    user_id = callback.from_user.id
     data = callback.data
     
     if data.startswith("month_"):
         # Пользователь выбрал месяц
         try:
             month_num = int(data.split("_")[1])
-            month_name_ru = MONTHS_RU.get(month_num, f"Месяц {month_num}")
-            
-            # Определяем год (предполагаем текущий год)
-            now = datetime.now(TIMEZONE)
-            year = now.year
             
             # Собираем данные за месяц
-            month_data = []
+            month_data = {}
             for day in range(1, 32):
                 date_str = f"{day:02d}.{month_num:02d}"
                 if date_str in prayer_data:
-                    times = prayer_data[date_str]
-                    month_data.append(format_month_prayer_times(times, day, month_name_ru))
+                    month_data[date_str] = prayer_data[date_str]
             
             if month_data:
-                response = f"📅 *Расписание на {month_name_ru} {year}*\n\n" + "\n".join(month_data)
+                response = format_month_table(month_data, month_num)
                 await callback.message.edit_text(
                     response, 
-                    parse_mode="Markdown"
+                    parse_mode=None  # Без форматирования Markdown
                 )
             else:
+                month_name_ru = MONTHS_RU.get(month_num, f"Месяц {month_num}")
                 await callback.message.edit_text(
                     f"❌ Данные на {month_name_ru} не найдены",
                     parse_mode="Markdown"
