@@ -95,7 +95,7 @@ def save_subscriptions():
 
 # ==================== КЛАВИАТУРЫ ====================
 def get_main_keyboard():
-    """Основная клавиатура с кнопками"""
+    """Основная inline клавиатура (как на фото)"""
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="📅 Сегодня", callback_data=PrayerCallback(action="today").pack()),
@@ -113,6 +113,30 @@ def get_main_keyboard():
             InlineKeyboardButton(text="ℹ️ Информация", callback_data=PrayerCallback(action="info").pack())
         ]
     ])
+    return keyboard
+
+def get_reply_keyboard():
+    """Меню внизу экрана с командами (Reply Keyboard)"""
+    keyboard = types.ReplyKeyboardMarkup(
+        keyboard=[
+            [
+                types.KeyboardButton(text="/today"),
+                types.KeyboardButton(text="/tomorrow"),
+                types.KeyboardButton(text="/month")
+            ],
+            [
+                types.KeyboardButton(text="/nextmonth"),
+                types.KeyboardButton(text="/notify on"),
+                types.KeyboardButton(text="/notify off")
+            ],
+            [
+                types.KeyboardButton(text="/info"),
+                types.KeyboardButton(text="/start")
+            ]
+        ],
+        resize_keyboard=True,
+        input_field_placeholder="Выберите команду или используйте кнопки выше"
+    )
     return keyboard
 
 # ==================== УТИЛИТЫ ====================
@@ -259,19 +283,33 @@ def schedule_prayer_notifications():
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     """Команда /start"""
+    user_id = message.from_user.id
+    
+    # АВТОМАТИЧЕСКАЯ ПОДПИСКА
+    subscribed_users.add(user_id)
+    save_subscriptions()
+    
     welcome_text = (
         "🕌 *Ассаламу алейкум!*\n\n"
         "Я бот с расписанием намазов для Черкесска.\n\n"
-        "📋 *Используйте кнопки ниже или команды:*\n"
-        "`/today` - расписание на сегодня\n"
-        "`/tomorrow` - на завтра\n"
-        "`/month` - на месяц\n"
-        "`/notify on` - включить уведомления\n"
-        "`/notify off` - выключить уведомления\n\n"
-        "⏰ *Уведомления приходят в точное время намазов!*"
+        "✅ *Вы автоматически подписаны на уведомления!*\n"
+        "⏰ Уведомления приходят в точное время намазов\n\n"
+        "📋 *Используйте кнопки выше или меню внизу:*"
     )
     
-    await message.answer(welcome_text, parse_mode="Markdown", reply_markup=get_main_keyboard())
+    # Отправляем сообщение с inline кнопками
+    await message.answer(
+        welcome_text, 
+        parse_mode="Markdown", 
+        reply_markup=get_main_keyboard()
+    )
+    
+    # Отправляем отдельное сообщение с меню команд
+    await message.answer(
+        "👇 *Используйте меню команд:*",
+        parse_mode="Markdown",
+        reply_markup=get_reply_keyboard()
+    )
 
 @dp.message(Command("today"))
 async def cmd_today(message: types.Message):
@@ -281,24 +319,39 @@ async def cmd_today(message: types.Message):
     
     if times:
         response = format_prayer_times(times, today)
-        await message.answer(response, parse_mode="Markdown", reply_markup=get_main_keyboard())
+        await message.answer(
+            response, 
+            parse_mode="Markdown", 
+            reply_markup=get_main_keyboard()
+        )
     else:
-        await message.answer("❌ Данные на сегодня не найдены")
+        await message.answer(
+            "❌ Данные на сегодня не найдены",
+            reply_markup=get_reply_keyboard()
+        )
 
 @dp.message(Command("tomorrow"))
 async def cmd_tomorrow(message: types.Message):
+    """Расписание на завтра"""
     tomorrow = datetime.now(TIMEZONE) + timedelta(days=1)
     times = get_prayer_times(tomorrow)
     
     if times:
         response = format_prayer_times(times, tomorrow)
-        await message.answer(response, parse_mode="Markdown", reply_markup=get_main_keyboard())
+        await message.answer(
+            response, 
+            parse_mode="Markdown", 
+            reply_markup=get_main_keyboard()
+        )
     else:
-        await message.answer("❌ Данные на завтра не найдены")
+        await message.answer(
+            "❌ Данные на завтра не найдены",
+            reply_markup=get_reply_keyboard()
+        )
 
 @dp.message(Command("month"))
 async def cmd_month(message: types.Message):
-    """Расписание на месяц"""
+    """Расписание на месяц (весь месяц целиком)"""
     now = datetime.now(TIMEZONE)
     month_name_ru = MONTHS_RU.get(now.month, now.strftime("%B"))
     month_data = []
@@ -310,16 +363,47 @@ async def cmd_month(message: types.Message):
             month_data.append(format_month_prayer_times(times, day, month_name_ru))
     
     if month_data:
-        # Разбиваем на части по 10 дней, чтобы не превысить лимит Telegram
-        chunks = [month_data[i:i+10] for i in range(0, len(month_data), 10)]
-        
-        for i, chunk in enumerate(chunks):
-            part_text = f" (Часть {i+1}/{len(chunks)})" if len(chunks) > 1 else ""
-            response = f"📅 *Расписание на {month_name_ru} {now.year}{part_text}*\n\n" + "\n".join(chunk)
-            await message.answer(response, parse_mode="Markdown", 
-                                 reply_markup=get_main_keyboard() if i == len(chunks)-1 else None)
+        response = f"📅 *Расписание на {month_name_ru} {now.year}*\n\n" + "\n".join(month_data)
+        await message.answer(
+            response, 
+            parse_mode="Markdown", 
+            reply_markup=get_main_keyboard()
+        )
     else:
-        await message.answer("❌ Данные на этот месяц не найдены")
+        await message.answer(
+            "❌ Данные на этот месяц не найдены",
+            reply_markup=get_reply_keyboard()
+        )
+
+@dp.message(Command("nextmonth"))
+async def cmd_nextmonth(message: types.Message):
+    """Расписание на следующий месяц (весь месяц целиком)"""
+    # Находим следующий месяц
+    now = datetime.now(TIMEZONE)
+    next_month = now.replace(day=28) + timedelta(days=4)  # Переходим на след месяц
+    next_month = next_month.replace(day=1)
+    
+    month_name_ru = MONTHS_RU.get(next_month.month, next_month.strftime("%B"))
+    month_data = []
+    
+    for day in range(1, 32):
+        date_str = f"{day:02d}.{next_month.month:02d}"
+        if date_str in prayer_data:
+            times = prayer_data[date_str]
+            month_data.append(format_month_prayer_times(times, day, month_name_ru))
+    
+    if month_data:
+        response = f"📅 *Расписание на {month_name_ru} {next_month.year}*\n\n" + "\n".join(month_data)
+        await message.answer(
+            response, 
+            parse_mode="Markdown", 
+            reply_markup=get_main_keyboard()
+        )
+    else:
+        await message.answer(
+            "❌ Данные на следующий месяц не найдены",
+            reply_markup=get_reply_keyboard()
+        )
 
 @dp.message(Command("notify"))
 async def cmd_notify(message: types.Message):
@@ -332,7 +416,7 @@ async def cmd_notify(message: types.Message):
             "Используйте:\n"
             "`/notify on` - включить уведомления\n"
             "`/notify off` - выключить уведомления",
-            reply_markup=get_main_keyboard()
+            reply_markup=get_reply_keyboard()
         )
         return
     
@@ -341,17 +425,42 @@ async def cmd_notify(message: types.Message):
     if action == "on":
         subscribed_users.add(user_id)
         save_subscriptions()
-        await message.answer("✅ Уведомления включены! Вы будете получать напоминания в точное время намазов.", reply_markup=get_main_keyboard())
+        await message.answer(
+            "✅ Уведомления включены! Вы будете получать напоминания в точное время намазов.", 
+            reply_markup=get_main_keyboard()
+        )
     elif action == "off":
         if user_id in subscribed_users:
             subscribed_users.remove(user_id)
             save_subscriptions()
-        await message.answer("🔕 Уведомления выключены.", reply_markup=get_main_keyboard())
+        await message.answer(
+            "🔕 Уведомления выключены.", 
+            reply_markup=get_main_keyboard()
+        )
+
+@dp.message(Command("info"))
+async def cmd_info(message: types.Message):
+    """Информация о боте"""
+    info_text = (
+        "🕌 *Информация о боте*\n\n"
+        "📍 *Местоположение:* Черкесск (КЧР)\n"
+        "🌐 *Координаты:* 44.22333, 42.05778\n"
+        "📊 *Данные:* 2026 год\n"
+        "👤 *Составитель:* Muslims of the KCHR Region\n"
+        "📅 *Обновлено:* 10.01.2026\n\n"
+        "📞 *Контакты:* 142773@gmail.com\n"
+        "📝 *Примечание:* Allahu Akbar"
+    )
+    await message.answer(
+        info_text, 
+        parse_mode="Markdown", 
+        reply_markup=get_main_keyboard()
+    )
 
 # ==================== ОБРАБОТКА КНОПОК ====================
 @dp.callback_query(PrayerCallback.filter())
 async def handle_callback(query: types.CallbackQuery, callback_data: PrayerCallback):
-    """Обработка нажатий кнопок"""
+    """Обработка нажатий inline кнопок"""
     user_id = query.from_user.id
     action = callback_data.action
     
@@ -360,14 +469,22 @@ async def handle_callback(query: types.CallbackQuery, callback_data: PrayerCallb
         times = get_prayer_times(today)
         if times:
             response = format_prayer_times(times, today)
-            await query.message.edit_text(response, parse_mode="Markdown", reply_markup=get_main_keyboard())
+            await query.message.edit_text(
+                response, 
+                parse_mode="Markdown", 
+                reply_markup=get_main_keyboard()
+            )
     
     elif action == "tomorrow":
         tomorrow = datetime.now(TIMEZONE) + timedelta(days=1)
         times = get_prayer_times(tomorrow)
         if times:
             response = format_prayer_times(times, tomorrow)
-            await query.message.edit_text(response, parse_mode="Markdown", reply_markup=get_main_keyboard())
+            await query.message.edit_text(
+                response, 
+                parse_mode="Markdown", 
+                reply_markup=get_main_keyboard()
+            )
     
     elif action == "month":
         now = datetime.now(TIMEZONE)
@@ -381,22 +498,19 @@ async def handle_callback(query: types.CallbackQuery, callback_data: PrayerCallb
                 month_data.append(format_month_prayer_times(times, day, month_name_ru))
         
         if month_data:
-            # Разбиваем на части по 10 дней
-            chunks = [month_data[i:i+10] for i in range(0, len(month_data), 10)]
-            chunk = chunks[0]  # Для inline кнопок показываем только первую часть
-            response = f"📅 *Расписание на {month_name_ru} {now.year}*\n\n" + "\n".join(chunk)
-            
-            # Добавляем кнопки для навигации если частей больше одной
-            keyboard = get_main_keyboard()
-            if len(chunks) > 1:
-                # Можно добавить дополнительные кнопки для навигации по частям
-                pass
-                
-            await query.message.edit_text(response, parse_mode="Markdown", reply_markup=keyboard)
+            response = f"📅 *Расписание на {month_name_ru} {now.year}*\n\n" + "\n".join(month_data)
+            await query.message.edit_text(
+                response, 
+                parse_mode="Markdown", 
+                reply_markup=get_main_keyboard()
+            )
     
     elif action == "nextmonth":
-        next_month = datetime.now(TIMEZONE) + timedelta(days=32)
+        # Находим следующий месяц
+        now = datetime.now(TIMEZONE)
+        next_month = now.replace(day=28) + timedelta(days=4)  # Переходим на след месяц
         next_month = next_month.replace(day=1)
+        
         month_name_ru = MONTHS_RU.get(next_month.month, next_month.strftime("%B"))
         month_data = []
         
@@ -407,11 +521,12 @@ async def handle_callback(query: types.CallbackQuery, callback_data: PrayerCallb
                 month_data.append(format_month_prayer_times(times, day, month_name_ru))
         
         if month_data:
-            # Разбиваем на части по 10 дней
-            chunks = [month_data[i:i+10] for i in range(0, len(month_data), 10)]
-            chunk = chunks[0]  # Для inline кнопок показываем только первую часть
-            response = f"📅 *Расписание на {month_name_ru} {next_month.year}*\n\n" + "\n".join(chunk)
-            await query.message.edit_text(response, parse_mode="Markdown", reply_markup=get_main_keyboard())
+            response = f"📅 *Расписание на {month_name_ru} {next_month.year}*\n\n" + "\n".join(month_data)
+            await query.message.edit_text(
+                response, 
+                parse_mode="Markdown", 
+                reply_markup=get_main_keyboard()
+            )
     
     elif action == "notify_on":
         subscribed_users.add(user_id)
@@ -443,7 +558,11 @@ async def handle_callback(query: types.CallbackQuery, callback_data: PrayerCallb
             "📞 *Контакты:* 142773@gmail.com\n"
             "📝 *Примечание:* Allahu Akbar"
         )
-        await query.message.edit_text(info_text, parse_mode="Markdown", reply_markup=get_main_keyboard())
+        await query.message.edit_text(
+            info_text, 
+            parse_mode="Markdown", 
+            reply_markup=get_main_keyboard()
+        )
     
     await query.answer()
 
@@ -471,13 +590,6 @@ async def on_startup():
         schedule_prayer_notifications,
         CronTrigger(hour=0, minute=1, timezone=TIMEZONE),
         id="daily_schedule_update"
-    )
-    
-    # Сохраняем подписки каждые 30 минут
-    scheduler.add_job(
-        save_subscriptions,
-        CronTrigger(minute="*/30", timezone=TIMEZONE),
-        id="save_subscriptions"
     )
     
     print("✅ Бот успешно запущен!")
