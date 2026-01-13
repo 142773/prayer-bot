@@ -46,8 +46,9 @@ PRAYER_NAMES = {
     'Isha': 'Иша'
 }
 
-# Порядок намазов для вывода
-PRAYER_ORDER = ['Fajr', 'Sunrise', 'Duhr', 'Asr', 'Maghrib', 'Isha']
+# Порядок намазов для вывода месяца (без восхода)
+PRAYER_ORDER_MONTH = ['Fajr', 'Duhr', 'Asr', 'Maghrib', 'Isha']
+
 # Порядок для детального вывода (день)
 DETAILED_PRAYER_ORDER = ['Fajr', 'Sunrise', 'Duhr', 'Asr', 'Maghrib', 'Isha', 'FirstThird', 'Midnight', 'LastThird']
 
@@ -173,7 +174,7 @@ def get_prayer_times(date_obj=None):
     return prayer_data.get(date_str, {})
 
 def format_prayer_times(times, date_obj=None):
-    """Форматирует время намазов для вывода (один день)"""
+    """Форматирует время намазов для вывода (один день) с использованием code блока"""
     if not times:
         return "📭 Данные для этой даты не найдены"
     
@@ -193,68 +194,73 @@ def format_prayer_times(times, date_obj=None):
         'LastThird': 'Последняя треть:'
     }
     
-    # Формируем строки с выравниванием
-    lines = []
-    
-    # Заголовок
     month_name_ru = MONTHS_RU.get(date_obj.month, date_obj.strftime("%B"))
-    lines.append(f"📅 {date_obj.day:02d} {month_name_ru}")
-    lines.append(f"📍 Черкесск (КЧР)")
-    lines.append("")
     
-    # Находим максимальную длину названий для выравнивания
-    max_name_length = max(len(detailed_names[prayer]) for prayer in DETAILED_PRAYER_ORDER if prayer in detailed_names)
+    # Создаем текст с code блоком для идеального выравнивания
+    text = f"📅 {date_obj.day:02d} {month_name_ru}\n"
+    text += f"📍 Черкесск (КЧР)\n\n"
     
-    # Добавляем времена намазов с выравниванием
+    # Используем code блок для моноширинного шрифта и выравнивания
+    text += "```\n"
+    
+    # Максимальная длина названия для выравнивания (без эмодзи)
+    max_name_length = 0
+    for name in detailed_names.values():
+        # Убираем эмодзи для расчета длины
+        clean_name = name.replace('🌄', '').replace('☀️', '').replace('🌤', '').replace('🌅', '').replace('🌙', '')
+        if len(clean_name) > max_name_length:
+            max_name_length = len(clean_name)
+    
     for prayer in DETAILED_PRAYER_ORDER:
         if prayer in detailed_names and prayer in times:
             name = detailed_names[prayer]
             time_str = times[prayer]
             
-            # Выравниваем названия до одинаковой длины
-            aligned_name = name.ljust(max_name_length)
-            lines.append(f"{aligned_name} {time_str}")
+            # Убираем эмодзи для расчета длины
+            clean_name = name.replace('🌄', '').replace('☀️', '').replace('🌤', '').replace('🌅', '').replace('🌙', '')
+            
+            # Добавляем пробелы для выравнивания
+            spaces_needed = max_name_length - len(clean_name) + 1  # +1 для отступа
+            text += f"{name}{' ' * spaces_needed}{time_str}\n"
     
-    return "\n".join(lines)
+    text += "```"
+    
+    return text
 
 def format_month_table(times_dict, month_num):
-    """Форматирует время намазов для вывода в виде таблицы на месяц"""
+    """Форматирует время намазов для вывода в виде таблицы на месяц (без восхода)"""
     if not times_dict:
         return "📭 Данные для этого месяца не найдены"
     
     month_name_ru = MONTHS_RU.get(month_num, f"Месяц {month_num}")
     
-    # Заголовок с названиями намазов
-    header = "Фаджр, Восх, Зухр, Аср, Магр, Иша"
+    # Заголовок
+    lines = [f"{month_name_ru}"]
     
     # Собираем строки для каждого дня
-    day_lines = []
-    
     for day in range(1, 32):
         date_str = f"{day:02d}.{month_num:02d}"
         if date_str in times_dict:
             times = times_dict[date_str]
             
-            # Формируем строку времен для дня
+            # Формируем строку времен для дня (без восхода)
             time_parts = []
-            for prayer in PRAYER_ORDER:
+            for prayer in PRAYER_ORDER_MONTH:
                 if prayer in times:
                     time_parts.append(times[prayer])
                 else:
                     time_parts.append("--:--")
             
-            time_str = ", ".join(time_parts)
+            time_str = " ".join(time_parts)
             
             # Формируем строку дня
-            day_line = f"{day:02d}. {month_name_ru}:\n{time_str}"
-            day_lines.append(day_line)
+            day_line = f"{day:02d}. {time_str}"
+            lines.append(day_line)
     
-    if not day_lines:
+    if len(lines) <= 1:  # Только заголовок
         return f"❌ Нет данных для {month_name_ru}"
     
-    # Объединяем все
-    result = header + "\n" + "\n".join(day_lines)
-    return result
+    return "\n".join(lines)
 
 def get_current_prayer_status(times):
     """Возвращает информацию о текущем намазе: сколько прошло и сколько осталось"""
@@ -464,7 +470,7 @@ async def handle_today_button(message: types.Message):
         response = format_prayer_times(times, today)
         await message.answer(
             response, 
-            parse_mode=None,  # Без форматирования Markdown
+            parse_mode="Markdown",  # Markdown для code блоков
             reply_markup=get_main_menu_keyboard()
         )
         
@@ -491,7 +497,7 @@ async def handle_tomorrow_button(message: types.Message):
         response = format_prayer_times(times, tomorrow)
         await message.answer(
             response, 
-            parse_mode=None,  # Без форматирования Markdown
+            parse_mode="Markdown",  # Markdown для code блоков
             reply_markup=get_main_menu_keyboard()
         )
     else:
@@ -536,11 +542,12 @@ async def handle_notify_off_button(message: types.Message):
 async def handle_info_button(message: types.Message):
     """Обработка кнопки Информация"""
     info_text = (
-        "🕌 *Информация о боте*\n\n"
-        "🕌 *Расписание намазов для города Черкесска*\n"
+        "🕌 *Расписание намазов для города Черкесска*\n\n"
         "📍 *Местоположение:* Черкесск (КЧР)\n"
         "🌐 *Координаты:* 44.22333, 42.05778\n\n"
-        "📝 Передают со слов Ибн Мас‘уда, что Посланник, мир ему и благословение Аллаха, сказал:\n «Самое лучшее деяние — это намаз, совершенный в начале отведенного для него времени».\n Этот хадис передали ат-Тирмизи и аль-Хаким."
+        "📝 *Хадис:*\n"
+        "«Самое лучшее деяние — это намаз, совершенный в начале отведенного для него времени».\n"
+        "Этот хадис передали ат-Тирмизи и аль-Хаким."
     )
     await message.answer(
         info_text, 
@@ -575,7 +582,7 @@ async def handle_inline_buttons(callback: types.CallbackQuery):
                 response = format_month_table(month_data, month_num)
                 await callback.message.edit_text(
                     response, 
-                    parse_mode=None  # Без форматирования Markdown
+                    parse_mode=None  # Без форматирования Markdown для простого текста
                 )
             else:
                 month_name_ru = MONTHS_RU.get(month_num, f"Месяц {month_num}")
