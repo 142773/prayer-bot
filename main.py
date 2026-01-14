@@ -271,18 +271,18 @@ def format_prayer_times(times, date_obj=None):
     text += f"📍 Черкесск (КЧР)\n\n"
     
     # Основные намазы - РУЧНОЕ ВЫРАВНИВАНИЕ для идеального результата
-    text += f"🌄 Фаджр:         {times.get('Fajr', '--:--')}\n"
-    text += f"Восход:          {times.get('Sunrise', '--:--')}\n"
-    text += f"☀️ Зухр:          {times.get('Duhr', '--:--')}\n"
-    text += f"🌤 Аср:           {times.get('Asr', '--:--')}\n"
+    text += f"🌄 Фаджр:          {times.get('Fajr', '--:--')}\n"
+    text += f"Восход:                {times.get('Sunrise', '--:--')}\n"
+    text += f"☀️ Зухр:              {times.get('Duhr', '--:--')}\n"
+    text += f"🌤 Аср:                {times.get('Asr', '--:--')}\n"
     text += f"🌅 Магриб:        {times.get('Maghrib', '--:--')}\n"
-    text += f"🌙 Иша:           {times.get('Isha', '--:--')}\n"
+    text += f"🌙 Иша:              {times.get('Isha', '--:--')}\n"
     
     text += "\n"
     
     # Ночные времена
-    text += f"Треть ночи:      {times.get('FirstThird', '--:--')}\n"
-    text += f"Полночь:         {times.get('Midnight', '--:--')}\n"
+    text += f"Треть ночи:         {times.get('FirstThird', '--:--')}\n"
+    text += f"Полночь:              {times.get('Midnight', '--:--')}\n"
     text += f"Посл.1/3 ночи:   {times.get('LastThird', '--:--')}\n"
     
     return text
