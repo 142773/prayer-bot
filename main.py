@@ -1,13 +1,6 @@
 """
 Бот для расписания намазов в Черкесске (КЧР)
-Автор: [Ваше имя/организация]
-Версия: 1.0
-
-Основные функции:
-1. Показ расписания на сегодня/завтра
-2. Показ расписания на месяц
-3. Уведомления о времени намазов
-4. Статус текущего намаза
+Версия 2.0 - с исправленными уведомлениями и выравниванием
 """
 
 import asyncio
@@ -30,8 +23,6 @@ from dotenv import load_dotenv
 import pytz
 
 # ==================== ЗАГРУЗКА ПЕРЕМЕННЫХ ОКРУЖЕНИЯ ====================
-# Загружаем переменные из .env файла (если он существует)
-# Это безопасный способ хранения секретных данных, таких как токен бота
 try:
     load_dotenv()  # Загружаем переменные из файла .env
 except:
@@ -45,11 +36,11 @@ API_TOKEN = os.getenv('API_TOKEN') or os.environ.get('API_TOKEN')
 if not API_TOKEN:
     print("❌ КРИТИЧЕСКАЯ ОШИБКА: Не найден API_TOKEN!")
     print("✅ На bothost.ru добавьте переменную окружения: API_TOKEN=ваш_токен")
-    exit(1)  # Завершаем программу, если токен не найден
+    exit(1)
 
 # Названия файлов с данными
-CSV_FILE = 'prayer_times_cherkessk.csv'  # Файл с расписанием намазов
-SUBSCRIPTIONS_FILE = 'subscriptions.json'  # Файл для хранения подписок
+CSV_FILE = 'prayer_times_cherkessk.csv'
+SUBSCRIPTIONS_FILE = 'subscriptions.json'
 
 # Устанавливаем часовой пояс (Москва для Черкесска)
 TIMEZONE = pytz.timezone('Europe/Moscow')
@@ -81,42 +72,24 @@ DETAILED_PRAYER_ORDER = ['Fajr', 'Sunrise', 'Duhr', 'Asr', 'Maghrib', 'Isha', 'F
 TIME_PRAYER_ORDER = ['Fajr', 'Duhr', 'Asr', 'Maghrib', 'Isha']
 
 # ==================== ИНИЦИАЛИЗАЦИЯ КОМПОНЕНТОВ ====================
-# Создаем объект бота с нашим токеном
 bot = Bot(token=API_TOKEN)
-
-# Создаем диспетчер для обработки сообщений
 dp = Dispatcher()
-
-# Создаем планировщик для уведомлений
 scheduler = AsyncIOScheduler(timezone=TIMEZONE)
 
 # ==================== РАБОТА С ДАННЫМИ ====================
-# Глобальные переменные для хранения данных
-prayer_data = {}  # Словарь для хранения расписания намазов
-subscribed_users = set()  # Множество для хранения ID подписанных пользователей
+prayer_data = {}
+subscribed_users = set()
 
 def load_prayer_data():
-    """
-    Загружает данные о времени намазов из CSV файла.
-    
-    Файл CSV должен содержать колонки:
-    Date, Fajr, Sunrise, Duhr, Asr, Maghrib, Isha, FirstThird, Midnight, LastThird
-    
-    Возвращает:
-        bool: True если загрузка успешна, False если произошла ошибка
-    """
-    global prayer_data  # Используем глобальную переменную
+    """Загружает данные о времени намазов из CSV файла"""
+    global prayer_data
     
     try:
-        # Открываем CSV файл для чтения
         with open(CSV_FILE, 'r', encoding='utf-8') as file:
-            csv_reader = csv.DictReader(file)  # Читаем как словарь
+            csv_reader = csv.DictReader(file)
             
-            # Обрабатываем каждую строку файла
             for row in csv_reader:
-                date_str = row['Date'].strip()  # Дата в формате "01.01"
-                
-                # Сохраняем время намазов для этой даты
+                date_str = row['Date'].strip()
                 prayer_data[date_str] = {
                     'Fajr': row['Fajr'].strip(),
                     'Sunrise': row['Sunrise'].strip(),
@@ -136,99 +109,96 @@ def load_prayer_data():
         return False
 
 def load_subscriptions():
-    """
-    Загружает список подписанных пользователей из JSON файла.
-    
-    Файл хранит ID пользователей, которые подписаны на уведомления.
-    """
+    """Загружает список подписанных пользователей из JSON файла"""
     global subscribed_users
     
     try:
-        # Проверяем существование файла
         if os.path.exists(SUBSCRIPTIONS_FILE):
             with open(SUBSCRIPTIONS_FILE, 'r', encoding='utf-8') as f:
-                data = json.load(f)  # Загружаем JSON данные
-                subscribed_users = set(data.get('users', []))  # Преобразуем в множество
+                data = json.load(f)
+                subscribed_users = set(data.get('users', []))
                 print(f"✅ Загружено {len(subscribed_users)} подписок")
     except Exception as e:
         print(f"❌ Ошибка загрузки подписок: {e}")
-        subscribed_users = set()  # Создаем пустое множество при ошибке
+        subscribed_users = set()
 
 def save_subscriptions():
-    """
-    Сохраняет список подписанных пользователей в JSON файл.
-    
-    Это нужно для сохранения подписок между перезапусками бота.
-    """
+    """Сохраняет список подписанных пользователей в JSON файл"""
     try:
-        # Подготавливаем данные для сохранения
-        data = {'users': list(subscribed_users)}  # Преобразуем множество в список
-        
-        # Сохраняем в файл
+        data = {'users': list(subscribed_users)}
         with open(SUBSCRIPTIONS_FILE, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)  # Красивый формат JSON
+            json.dump(data, f, ensure_ascii=False, indent=2)
         print("✅ Подписки сохранены")
     except Exception as e:
         print(f"❌ Ошибка сохранения подписок: {e}")
 
+def log_notification_status():
+    """Логирует статус уведомлений для отладки"""
+    today = datetime.now(TIMEZONE)
+    today_str = today.strftime("%d.%m")
+    times = prayer_data.get(today_str, {})
+    
+    print(f"\n🔔 СТАТУС УВЕДОМЛЕНИЙ:")
+    print(f"📅 Дата: {today_str}")
+    print(f"🕐 Текущее время: {today.strftime('%H:%M:%S')}")
+    print(f"👥 Подписанных пользователей: {len(subscribed_users)}")
+    
+    if times:
+        print("✅ Данные на сегодня найдены:")
+        for prayer in ['Fajr', 'Duhr', 'Asr', 'Maghrib', 'Isha']:
+            if prayer in times:
+                print(f"   {prayer}: {times[prayer]}")
+    else:
+        print("❌ Нет данных на сегодня")
+    
+    # Показываем запланированные задания
+    jobs = scheduler.get_jobs()
+    print(f"\n📋 Запланировано заданий: {len(jobs)}")
+    for job in jobs:
+        next_run = job.next_run_time.astimezone(TIMEZONE) if job.next_run_time else "Не запланировано"
+        print(f"   - {job.id}: {next_run}")
+
 # ==================== КЛАВИАТУРЫ И ИНТЕРФЕЙС ====================
 def get_main_menu_keyboard():
-    """
-    Создает основное меню бота (кнопки внизу экрана).
-    
-    Возвращает:
-        ReplyKeyboardMarkup: Объект клавиатуры с 6 кнопками
-    """
+    """Создает основное меню бота (кнопки внизу экрана)"""
     keyboard = types.ReplyKeyboardMarkup(
         keyboard=[
-            # Первый ряд кнопок
             [
                 types.KeyboardButton(text="🕐 Сегодня"),
                 types.KeyboardButton(text="⏩ Завтра"),
                 types.KeyboardButton(text="🗓️ Месяц")
             ],
-            # Второй ряд кнопок
             [
                 types.KeyboardButton(text="🔔 Вкл уведомления"),
                 types.KeyboardButton(text="🔕 Выкл уведомления")
             ],
-            # Третий ряд кнопок
             [
+                types.KeyboardButton(text="📊 Статус"),
                 types.KeyboardButton(text="ℹ️ Информация"),
                 types.KeyboardButton(text="🔄 Обновить")
             ]
         ],
-        resize_keyboard=True,  # Кнопки подстраиваются под размер экрана
-        input_field_placeholder="Выберите действие"  # Подсказка в поле ввода
+        resize_keyboard=True,
+        input_field_placeholder="Выберите действие"
     )
     return keyboard
 
 def get_months_keyboard():
-    """
-    Создает inline-клавиатуру с выбором месяца.
-    
-    Inline-кнопки появляются внутри сообщения, а не внизу экрана.
-    
-    Возвращает:
-        InlineKeyboardMarkup: Клавиатура с 12 месяцами и кнопкой возврата
-    """
+    """Создает inline-клавиатуру с выбором месяца"""
     keyboard = InlineKeyboardMarkup(inline_keyboard=[])
     
-    # Создаем кнопки по 3 в ряд
     months_row = []
     for month_num, month_name in MONTHS_RU.items():
         months_row.append(
             InlineKeyboardButton(text=month_name, callback_data=f"month_{month_num}")
         )
-        if len(months_row) == 3:  # Каждый третий месяц начинаем новый ряд
+        if len(months_row) == 3:
             keyboard.inline_keyboard.append(months_row)
             months_row = []
     
-    # Добавляем оставшиеся месяцы (если не кратно 3)
     if months_row:
         keyboard.inline_keyboard.append(months_row)
     
-    # Добавляем кнопку возврата в главное меню
     keyboard.inline_keyboard.append([
         InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="back_to_menu")
     ])
@@ -237,27 +207,15 @@ def get_months_keyboard():
 
 # ==================== УТИЛИТЫ ДЛЯ ФОРМАТИРОВАНИЯ ====================
 def get_prayer_times(date_obj=None):
-    """
-    Получает время намазов для указанной даты.
-    
-    Аргументы:
-        date_obj (datetime, optional): Дата для получения расписания.
-                                      Если None, используется текущая дата.
-    
-    Возвращает:
-        dict: Словарь с временами намазов или пустой словарь, если дата не найдена
-    """
+    """Получает время намазов для указанной даты"""
     if date_obj is None:
-        date_obj = datetime.now(TIMEZONE)  # Используем текущую дату
+        date_obj = datetime.now(TIMEZONE)
     
-    # Преобразуем дату в строку формата "01.01"
     date_str = date_obj.strftime("%d.%m")
-    
-    # Возвращаем данные или пустой словарь
     return prayer_data.get(date_str, {})
 
 def format_prayer_times(times, date_obj=None):
-    """Форматирует время намазов с точным выравниванием как в примере"""
+    """Форматирует время намазов с точным выравниванием"""
     if not times:
         return "📭 Данные для этой даты не найдены"
     
@@ -270,47 +228,33 @@ def format_prayer_times(times, date_obj=None):
     text = f"📅 {date_obj.day:02d} {month_name_ru}\n"
     text += f"📍 Черкесск (КЧР)\n\n"
     
-    # Основные намазы - РУЧНОЕ ВЫРАВНИВАНИЕ для идеального результата
-    text += f"🌄 Фаджр:          {times.get('Fajr', '--:--')}\n"
-    text += f"Восход:                {times.get('Sunrise', '--:--')}\n"
-    text += f"☀️ Зухр:              {times.get('Duhr', '--:--')}\n"
-    text += f"🌤 Аср:                {times.get('Asr', '--:--')}\n"
+    # Основные намазы с ручным выравниванием для идеального результата
+    text += f"🌄 Фаджр:         {times.get('Fajr', '--:--')}\n"
+    text += f"Восход:          {times.get('Sunrise', '--:--')}\n"
+    text += f"☀️ Зухр:          {times.get('Duhr', '--:--')}\n"
+    text += f"🌤 Аср:           {times.get('Asr', '--:--')}\n"
     text += f"🌅 Магриб:        {times.get('Maghrib', '--:--')}\n"
-    text += f"🌙 Иша:              {times.get('Isha', '--:--')}\n"
+    text += f"🌙 Иша:           {times.get('Isha', '--:--')}\n"
     
     text += "\n"
     
     # Ночные времена
-    text += f"Треть ночи:         {times.get('FirstThird', '--:--')}\n"
-    text += f"Полночь:              {times.get('Midnight', '--:--')}\n"
+    text += f"Треть ночи:      {times.get('FirstThird', '--:--')}\n"
+    text += f"Полночь:         {times.get('Midnight', '--:--')}\n"
     text += f"Посл.1/3 ночи:   {times.get('LastThird', '--:--')}\n"
     
     return text
 
 def format_month_table(times_dict, month_num):
-    """
-    Форматирует время намазов для вывода в виде таблицы на месяц.
-    
-    Выводит простую таблицу с заголовками и данными.
-    
-    Аргументы:
-        times_dict (dict): Словарь с данными на месяц
-        month_num (int): Номер месяца (1-12)
-    
-    Возвращает:
-        str: Отформатированная таблица с расписанием на месяц
-    """
+    """Форматирует время намазов для вывода в виде таблицы на месяц"""
     if not times_dict:
         return "📭 Данные для этого месяца не найдены"
     
-    # Получаем название месяца на русском
     month_name_ru = MONTHS_RU.get(month_num, f"Месяц {month_num}")
     
-    # Создаем заголовок
-    lines = [f"📅 {month_name_ru}"]  # Первая строка - название месяца
+    lines = [f"📅 {month_name_ru}"]
     
-    # === ШАГ 1: Добавляем заголовки таблицы ===
-    # Русские названия намазов для заголовка
+    # Добавляем заголовки таблицы
     prayer_names_ru = {
         'Fajr': 'Фаджр',
         'Duhr': 'Зухр', 
@@ -319,121 +263,81 @@ def format_month_table(times_dict, month_num):
         'Isha': 'Иша'
     }
     
-    # Создаем строку с названиями намазов (заголовок таблицы)
     header_parts = []
     for prayer in PRAYER_ORDER_MONTH:
         if prayer in prayer_names_ru:
             header_parts.append(prayer_names_ru[prayer])
     
-    # Добавляем заголовок таблицы
     if header_parts:
-        # Объединяем названия через один пробел
         lines.append(" ".join(header_parts))
     
-    # === ШАГ 2: Добавляем данные для каждого дня ===
+    # Добавляем данные для каждого дня
     for day in range(1, 32):
-        date_str = f"{day:02d}.{month_num:02d}"  # Формат "01.01"
-        
-        # Проверяем есть ли данные для этого дня
+        date_str = f"{day:02d}.{month_num:02d}"
         if date_str in times_dict:
             times = times_dict[date_str]
             
-            # Формируем строку времен для дня (без восхода)
             time_parts = []
             for prayer in PRAYER_ORDER_MONTH:
                 if prayer in times:
-                    time_parts.append(times[prayer])  # Добавляем время
+                    time_parts.append(times[prayer])
                 else:
-                    time_parts.append("--:--")  # Заполнитель если данных нет
+                    time_parts.append("--:--")
             
-            # Объединяем времена через один пробел
             time_str = " ".join(time_parts)
-            
-            # Формируем строку дня с ведущим нулем
             day_line = f"{day:02d}. {time_str}"
             lines.append(day_line)
     
-    # Проверяем, есть ли данные для этого месяца
-    if len(lines) <= 2:  # Только заголовки
+    if len(lines) <= 2:
         return f"❌ Нет данных для {month_name_ru}"
     
-    # Объединяем все строки через перенос строки
     return "\n".join(lines)
 
 def get_current_prayer_status(times):
-    """
-    Определяет статус текущего намаза: сколько прошло и сколько осталось.
-    
-    Рассчитывает:
-    1. Какой намаз был последним и сколько времени прошло
-    2. Какой намаз будет следующим и сколько времени осталось
-    
-    Аргументы:
-        times (dict): Словарь с временами намазов на сегодня
-    
-    Возвращает:
-        str: Текстовое описание статуса в формате Markdown
-    """
-    # Получаем текущее время в нужном часовом поясе
+    """Определяет статус текущего намаза: сколько прошло и сколько осталось"""
     now = datetime.now(TIMEZONE)
-    current_time = now.time()  # Только время (без даты)
+    current_time = now.time()
     
-    # Создаем список кортежей (название намаза, время намаза как datetime)
     prayer_times = []
     for prayer in TIME_PRAYER_ORDER:
         if prayer in times and times[prayer] != '--:--':
             try:
-                # Парсим время из строки "06:30"
                 hour, minute = map(int, times[prayer].split(':'))
-                
-                # Создаем datetime объект для намаза (сегодняшняя дата)
                 prayer_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
                 prayer_times.append((prayer, prayer_time))
             except:
-                continue  # Пропускаем некорректные данные
+                continue
     
-    # Если нет данных о времени намазов
     if not prayer_times:
         return "⏰ Нет данных о времени намазов"
     
-    # Находим предыдущий и следующий намаз
     previous_prayer = None
     next_prayer = None
     
     for prayer, prayer_time in prayer_times:
-        # Если время намаза уже прошло сегодня
         if prayer_time.time() <= current_time:
             previous_prayer = (prayer, prayer_time)
-        # Если время намаза еще не наступило и следующий не найден
         elif prayer_time.time() > current_time and next_prayer is None:
             next_prayer = (prayer, prayer_time)
     
-    # === СЛУЧАЙ 1: Сейчас после последнего намаза (Иша) ===
-    # Если последний намаз был Иша, то следующий - Фаджр завтрашнего дня
     if previous_prayer and previous_prayer[0] == 'Isha':
-        # Получаем данные на завтра
         next_day = now + timedelta(days=1)
         next_day_str = next_day.strftime("%d.%m")
         next_day_times = prayer_data.get(next_day_str, {})
         
-        # Если есть данные о Фаджре на завтра
         if 'Fajr' in next_day_times and next_day_times['Fajr'] != '--:--':
             try:
                 hour, minute = map(int, next_day_times['Fajr'].split(':'))
                 next_fajr = next_day.replace(hour=hour, minute=minute, second=0, microsecond=0)
                 next_prayer = ('Fajr', next_fajr)
             except:
-                pass  # Если ошибка парсинга, оставляем как есть
+                pass
     
-    # === ШАГ 3: Формируем текстовое сообщение ===
     status_text = "⏳ *Текущий статус:*\n\n"
     
-    # Информация о последнем намазе
     if previous_prayer:
         prayer_name_ru = PRAYER_NAMES.get(previous_prayer[0], previous_prayer[0])
-        time_passed = now - previous_prayer[1]  # Разница времени
-        
-        # Преобразуем разницу в часы и минуты
+        time_passed = now - previous_prayer[1]
         hours_passed = time_passed.seconds // 3600
         minutes_passed = (time_passed.seconds % 3600) // 60
         
@@ -443,18 +347,14 @@ def get_current_prayer_status(times):
     else:
         status_text += "📌 Еще не было намазов сегодня\n\n"
     
-    # Информация о следующем намазе
     if next_prayer:
         prayer_name_ru = PRAYER_NAMES.get(next_prayer[0], next_prayer[0])
-        time_left = next_prayer[1] - now  # Сколько времени осталось
+        time_left = next_prayer[1] - now
         
-        # Проверяем что время еще не наступило
         if time_left.total_seconds() > 0:
             hours_left = time_left.seconds // 3600
             minutes_left = (time_left.seconds % 3600) // 60
             
-            # Получаем время следующего намаза
-            # Особый случай: Фаджр следующего дня
             if next_prayer[0] == 'Fajr' and next_prayer[1].date() > now.date():
                 next_day_str = next_prayer[1].strftime("%d.%m")
                 next_day_times = prayer_data.get(next_day_str, {})
@@ -474,21 +374,11 @@ def get_current_prayer_status(times):
 
 # ==================== СИСТЕМА УВЕДОМЛЕНИЙ ====================
 async def send_prayer_notification(prayer_name, prayer_time_str, prayer_data_today):
-    """
-    Отправляет уведомление о времени намаза всем подписанным пользователям.
+    """Отправляет уведомление о времени намаза с улучшенной обработкой ошибок"""
+    print(f"🔔 Пытаюсь отправить уведомление для {prayer_name} в {prayer_time_str}")
     
-    Аргументы:
-        prayer_name (str): Название намаза на русском
-        prayer_time_str (str): Время намаза в формате "06:30"
-        prayer_data_today (dict): Все данные о намазах на сегодня
-    
-    Особые уведомления:
-        - Для Фаджра: добавляет время восхода
-        - Для Иша: добавляет ночные времена
-    """
     notification_text = ""
     
-    # === УВЕДОМЛЕНИЕ ДЛЯ ФАДЖРА ===
     if prayer_name == "Фаджр":
         sunrise = prayer_data_today.get('Sunrise', '--:--')
         notification_text = (
@@ -498,13 +388,10 @@ async def send_prayer_notification(prayer_name, prayer_time_str, prayer_data_tod
             f"Не пропустите утренний намаз!"
         )
     
-    # === УВЕДОМЛЕНИЕ ДЛЯ ИША ===
     elif prayer_name == "Иша":
-        # Получаем ночные времена
         first_third = prayer_data_today.get('FirstThird', '--:--')
         midnight = prayer_data_today.get('Midnight', '--:--')
         last_third = prayer_data_today.get('LastThird', '--:--')
-        
         notification_text = (
             f"🕌 *Время намаза!*\n\n"
             f"🌙 *{prayer_name}* в `{prayer_time_str}`\n\n"
@@ -515,7 +402,6 @@ async def send_prayer_notification(prayer_name, prayer_time_str, prayer_data_tod
             f"Используйте это время для тахаджуд намаза!"
         )
     
-    # === УВЕДОМЛЕНИЕ ДЛЯ ОСТАЛЬНЫХ НАМАЗОВ ===
     else:
         notification_text = (
             f"🕌 *Время намаза!*\n\n"
@@ -523,38 +409,52 @@ async def send_prayer_notification(prayer_name, prayer_time_str, prayer_data_tod
             f"Не пропустите намаз!"
         )
     
-    # Отправляем уведомление всем подписанным пользователям
+    success_count = 0
+    error_count = 0
+    
+    if not subscribed_users:
+        print("⚠️ Нет подписанных пользователей для отправки уведомлений")
+        return
+    
     for user_id in subscribed_users:
         try:
             await bot.send_message(user_id, notification_text, parse_mode="Markdown")
+            success_count += 1
+            print(f"✅ Уведомление отправлено пользователю {user_id}")
         except Exception as e:
-            # Логируем ошибку, но не останавливаем бота
-            print(f"Не удалось отправить уведомление пользователю {user_id}: {e}")
+            error_count += 1
+            print(f"❌ Ошибка отправки пользователю {user_id}: {e}")
+            
+            if "bot was blocked" in str(e).lower() or "user is deactivated" in str(e).lower():
+                subscribed_users.discard(user_id)
+                print(f"🗑️ Пользователь {user_id} удален из подписок")
+    
+    print(f"📊 Итог: отправлено {success_count}, ошибок {error_count}")
+    
+    if error_count > 0:
+        save_subscriptions()
 
 def schedule_prayer_notifications():
-    """
-    Планирует уведомления о намазах на сегодня.
+    """Планирует уведомления о намазах на сегодня с улучшенной обработкой ошибок"""
+    print("\n⏰ Начинаю планирование уведомлений...")
     
-    Эта функция:
-    1. Удаляет старые уведомления
-    2. Получает расписание на сегодня
-    3. Создает задания для каждого намаза
-    
-    Вызывается при старте бота и каждый день в 00:01.
-    """
-    # Удаляем все старые задания
+    old_jobs = len(scheduler.get_jobs())
     scheduler.remove_all_jobs()
+    print(f"🗑️ Удалено старых заданий: {old_jobs}")
     
-    # Получаем данные на сегодня
     today = datetime.now(TIMEZONE)
     today_str = today.strftime("%d.%m")
     times = prayer_data.get(today_str, {})
     
-    # Если нет данных на сегодня, выходим
+    print(f"📅 Сегодня: {today_str}")
+    print(f"🕐 Текущее время: {today.strftime('%H:%M:%S')}")
+    
     if not times:
+        print("❌ Нет данных о намазах на сегодня")
         return
     
-    # Список намазов для уведомлений
+    print("✅ Данные на сегодня найдены")
+    
     prayers = [
         ("Фаджр", times['Fajr']),
         ("Зухр", times['Duhr']),
@@ -563,13 +463,11 @@ def schedule_prayer_notifications():
         ("Иша", times['Isha'])
     ]
     
-    # Создаем задание для каждого намаза
+    scheduled_count = 0
+    
     for prayer_name, prayer_time_str in prayers:
         try:
-            # Парсим время из строки "06:30"
             prayer_hour, prayer_minute = map(int, prayer_time_str.split(':'))
-            
-            # Создаем datetime объект для точного времени намаза
             prayer_datetime = today.replace(
                 hour=prayer_hour, 
                 minute=prayer_minute, 
@@ -577,47 +475,53 @@ def schedule_prayer_notifications():
                 microsecond=0
             )
             
-            # Добавляем задание в планировщик
+            if prayer_datetime < today:
+                print(f"⏭️ Пропускаем {prayer_name} ({prayer_time_str}) - время уже прошло")
+                continue
+            
+            job_id = f"{prayer_name}_{today_str}"
+            
             scheduler.add_job(
-                send_prayer_notification,  # Функция для вызова
-                CronTrigger(  # Триггер по времени
-                    hour=prayer_datetime.hour,
-                    minute=prayer_datetime.minute,
+                send_prayer_notification,
+                CronTrigger(
+                    hour=prayer_hour,
+                    minute=prayer_minute,
                     timezone=TIMEZONE
                 ),
-                args=[prayer_name, prayer_time_str, times],  # Аргументы функции
-                id=f"{prayer_name}_{today_str}"  # Уникальный ID задания
+                args=[prayer_name, prayer_time_str, times],
+                id=job_id,
+                misfire_grace_time=300,
+                coalesce=True
             )
             
-            print(f"⏰ Запланировано уведомление для {prayer_name} на {prayer_time_str}")
+            scheduled_count += 1
+            print(f"✅ Запланировано: {prayer_name} на {prayer_time_str} (ID: {job_id})")
             
+        except ValueError as e:
+            print(f"❌ Ошибка парсинга времени для {prayer_name} ({prayer_time_str}): {e}")
         except Exception as e:
             print(f"❌ Ошибка планирования {prayer_name}: {e}")
+    
+    print(f"📋 Итог планирования: запланировано {scheduled_count} из {len(prayers)} намазов")
+    
+    jobs = scheduler.get_jobs()
+    if jobs:
+        print("\n📅 Запланированные уведомления:")
+        for job in jobs:
+            next_run = job.next_run_time.astimezone(TIMEZONE) if job.next_run_time else "Не запланировано"
+            print(f"   • {job.id}: {next_run}")
+    else:
+        print("⚠️ Нет запланированных уведомлений")
 
 # ==================== КОМАНДЫ И ОБРАБОТЧИКИ БОТА ====================
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
-    """
-    Обработчик команды /start.
+    """Обработчик команды /start"""
+    user_id = message.from_user.id
     
-    Выполняется когда пользователь:
-    1. Впервые запускает бота
-    2. Нажимает /start
-    3. Нажимает кнопку "Обновить"
+    subscribed_users.add(user_id)
+    save_subscriptions()
     
-    Действия:
-    1. Автоматически подписывает пользователя на уведомления
-    2. Сохраняет подписку
-    3. Отправляет приветственное сообщение
-    4. Показывает основное меню
-    """
-    user_id = message.from_user.id  # Получаем ID пользователя
-    
-    # АВТОМАТИЧЕСКАЯ ПОДПИСКА ПРИ СТАРТЕ
-    subscribed_users.add(user_id)  # Добавляем пользователя в подписки
-    save_subscriptions()  # Сохраняем изменения
-    
-    # Приветственное сообщение
     welcome_text = (
         "🕌 *Ассаламу алейкум!*\n\n"
         "Я бот с расписанием намазов для Черкесска.\n\n"
@@ -626,41 +530,62 @@ async def cmd_start(message: types.Message):
         "*Используйте меню внизу: 👇*"
     )
     
-    # Отправляем сообщение с меню
     await message.answer(
         welcome_text, 
         parse_mode="Markdown",
         reply_markup=get_main_menu_keyboard()
     )
 
-# --- ОБРАБОТЧИКИ КНОПОК МЕНЮ ---
+@dp.message(Command("status"))
+async def cmd_status(message: types.Message):
+    """Показывает статус уведомлений"""
+    today = datetime.now(TIMEZONE)
+    today_str = today.strftime("%d.%m")
+    times = prayer_data.get(today_str, {})
+    
+    status_text = f"🔔 *Статус уведомлений*\n\n"
+    status_text += f"📅 Сегодня: {today_str}\n"
+    status_text += f"👥 Ваш ID: {message.from_user.id}\n"
+    status_text += f"🔔 Ваша подписка: {'✅ ВКЛ' if message.from_user.id in subscribed_users else '❌ ВЫКЛ'}\n\n"
+    
+    if times:
+        status_text += f"📋 *Расписание на сегодня:*\n"
+        for prayer in ['Фаджр', 'Зухр', 'Аср', 'Магриб', 'Иша']:
+            eng_name = {'Фаджр': 'Fajr', 'Зухр': 'Duhr', 'Аср': 'Asr', 'Магриб': 'Maghrib', 'Иша': 'Isha'}[prayer]
+            if eng_name in times:
+                status_text += f"• {prayer}: `{times[eng_name]}`\n"
+    
+    jobs = scheduler.get_jobs()
+    if jobs:
+        status_text += f"\n📅 *Запланировано уведомлений:* {len(jobs)}\n"
+        for job in jobs[:3]:
+            next_run = job.next_run_time.astimezone(TIMEZONE) if job.next_run_time else "—"
+            prayer_name = job.id.split('_')[0]
+            status_text += f"• {prayer_name}: {next_run.strftime('%H:%M') if next_run != '—' else '—'}\n"
+    else:
+        status_text += "\n⚠️ Нет запланированных уведомлений"
+    
+    await message.answer(status_text, parse_mode="Markdown")
+    log_notification_status()
 
 @dp.message(lambda message: message.text == "🕐 Сегодня")
 async def handle_today_button(message: types.Message):
-    """
-    Обработчик кнопки "Сегодня".
-    
-    Показывает:
-    1. Полное расписание на сегодня
-    2. Статус текущего намаза
-    """
+    """Обработчик кнопки Сегодня"""
     today = datetime.now(TIMEZONE)
-    times = get_prayer_times(today)  # Получаем данные на сегодня
+    times = get_prayer_times(today)
     
     if times:
-        # ШАГ 1: Показываем расписание
         response = format_prayer_times(times, today)
         await message.answer(
             response, 
-            parse_mode=None,  # Без Markdown для точного выравнивания
+            parse_mode=None,
             reply_markup=get_main_menu_keyboard()
         )
         
-        # ШАГ 2: Показываем статус
         status = get_current_prayer_status(times)
         await message.answer(
             status,
-            parse_mode="Markdown",  # Markdown для форматирования
+            parse_mode="Markdown",
             reply_markup=get_main_menu_keyboard()
         )
     else:
@@ -671,19 +596,15 @@ async def handle_today_button(message: types.Message):
 
 @dp.message(lambda message: message.text == "⏩ Завтра")
 async def handle_tomorrow_button(message: types.Message):
-    """
-    Обработчик кнопки "Завтра".
-    
-    Показывает расписание намазов на завтра.
-    """
+    """Обработчик кнопки Завтра"""
     tomorrow = datetime.now(TIMEZONE) + timedelta(days=1)
-    times = get_prayer_times(tomorrow)  # Получаем данные на завтра
+    times = get_prayer_times(tomorrow)
     
     if times:
         response = format_prayer_times(times, tomorrow)
         await message.answer(
             response, 
-            parse_mode=None,  # Без Markdown для точного выравнивания
+            parse_mode=None,
             reply_markup=get_main_menu_keyboard()
         )
     else:
@@ -694,11 +615,7 @@ async def handle_tomorrow_button(message: types.Message):
 
 @dp.message(lambda message: message.text == "🗓️ Месяц")
 async def handle_month_button(message: types.Message):
-    """
-    Обработчик кнопки "Месяц".
-    
-    Показывает inline-клавиатуру для выбора месяца.
-    """
+    """Обработчик кнопки Месяц"""
     await message.answer(
         "📅 *Выберите месяц:*",
         parse_mode="Markdown",
@@ -707,15 +624,10 @@ async def handle_month_button(message: types.Message):
 
 @dp.message(lambda message: message.text == "🔔 Вкл уведомления")
 async def handle_notify_on_button(message: types.Message):
-    """
-    Обработчик кнопки "Вкл уведомления".
-    
-    Добавляет пользователя в список подписок.
-    """
+    """Обработчик кнопки Вкл уведомления"""
     user_id = message.from_user.id
-    subscribed_users.add(user_id)  # Добавляем в подписки
-    save_subscriptions()  # Сохраняем
-    
+    subscribed_users.add(user_id)
+    save_subscriptions()
     await message.answer(
         "✅ Уведомления включены! Вы будете получать напоминания в точное время намазов.", 
         reply_markup=get_main_menu_keyboard()
@@ -723,28 +635,24 @@ async def handle_notify_on_button(message: types.Message):
 
 @dp.message(lambda message: message.text == "🔕 Выкл уведомления")
 async def handle_notify_off_button(message: types.Message):
-    """
-    Обработчик кнопки "Выкл уведомления".
-    
-    Удаляет пользователя из списка подписок.
-    """
+    """Обработчик кнопки Выкл уведомления"""
     user_id = message.from_user.id
     if user_id in subscribed_users:
-        subscribed_users.remove(user_id)  # Удаляем из подписок
-        save_subscriptions()  # Сохраняем
-    
+        subscribed_users.remove(user_id)
+        save_subscriptions()
     await message.answer(
         "🔕 Уведомления выключены.", 
         reply_markup=get_main_menu_keyboard()
     )
 
+@dp.message(lambda message: message.text == "📊 Статус")
+async def handle_status_button(message: types.Message):
+    """Обработчик кнопки Статус"""
+    await cmd_status(message)
+
 @dp.message(lambda message: message.text == "ℹ️ Информация")
 async def handle_info_button(message: types.Message):
-    """
-    Обработчик кнопки "Информация".
-    
-    Показывает информацию о боте и местоположении.
-    """
+    """Обработчик кнопки Информация"""
     info_text = (
         "🕌 *Расписание намазов для города Черкесска.*\n\n"
         "📍 *Местоположение:* \nЧеркесск (КЧР)\n"
@@ -761,44 +669,29 @@ async def handle_info_button(message: types.Message):
 
 @dp.message(lambda message: message.text == "🔄 Обновить")
 async def handle_refresh_button(message: types.Message):
-    """
-    Обработчик кнопки "Обновить".
-    
-    Перезапускает бота для текущего пользователя.
-    """
-    await cmd_start(message)  # Вызываем стартовую команду
+    """Обработчик кнопки Обновить"""
+    await cmd_start(message)
 
-# ==================== ОБРАБОТКА INLINE-КНОПОК (МЕСЯЦЫ) ====================
 @dp.callback_query()
 async def handle_inline_buttons(callback: types.CallbackQuery):
-    """
-    Обработчик всех inline-кнопок.
+    """Обработчик inline кнопок"""
+    data = callback.data
     
-    Обрабатывает:
-    1. Кнопки выбора месяца (month_1, month_2, ...)
-    2. Кнопку возврата в меню (back_to_menu)
-    """
-    data = callback.data  # Получаем данные из кнопки
-    
-    # === ОБРАБОТКА ВЫБОРА МЕСЯЦА ===
     if data.startswith("month_"):
         try:
-            # Извлекаем номер месяца из callback_data
             month_num = int(data.split("_")[1])
             
-            # Собираем данные за выбранный месяц
             month_data = {}
             for day in range(1, 32):
                 date_str = f"{day:02d}.{month_num:02d}"
                 if date_str in prayer_data:
                     month_data[date_str] = prayer_data[date_str]
             
-            # Если есть данные за месяц
             if month_data:
                 response = format_month_table(month_data, month_num)
                 await callback.message.edit_text(
                     response, 
-                    parse_mode=None  # Без форматирования Markdown
+                    parse_mode=None
                 )
             else:
                 month_name_ru = MONTHS_RU.get(month_num, f"Месяц {month_num}")
@@ -808,58 +701,43 @@ async def handle_inline_buttons(callback: types.CallbackQuery):
                 )
                 
         except Exception as e:
-            # В случае ошибки показываем сообщение об ошибке
             await callback.message.edit_text(
                 f"❌ Ошибка: {str(e)}",
                 parse_mode="Markdown"
             )
     
-    # === ОБРАБОТКА КНОПКИ ВОЗВРАТА ===
     elif data == "back_to_menu":
-        # Удаляем сообщение с выбором месяца
         await callback.message.delete()
-        
-        # Показываем главное меню
         await callback.message.answer(
             "👇 *Используйте меню внизу:*",
             parse_mode="Markdown",
             reply_markup=get_main_menu_keyboard()
         )
     
-    # Подтверждаем обработку callback (убираем часики на кнопке)
     await callback.answer()
 
 # ==================== ЗАПУСК БОТА ====================
 async def on_startup():
-    """
-    Функция запуска, выполняется при старте бота.
-    
-    Выполняет:
-    1. Загрузку данных из CSV
-    2. Загрузку подписок из файла
-    3. Планирование уведомлений
-    4. Запуск планировщика
-    5. Настройку ежедневного обновления
-    """
+    """Действия при запуске бота"""
+    print("=" * 50)
     print("🚀 Бот запускается...")
-    print(f"✅ Токен получен: {API_TOKEN[:10]}...")  # Показываем только первые 10 символов токена
+    print(f"✅ Токен получен: {API_TOKEN[:10]}...")
+    print(f"🌐 Часовой пояс: {TIMEZONE}")
+    print("=" * 50)
     
-    # ШАГ 1: Загружаем данные о намазах
     if not load_prayer_data():
         print("❌ Критическая ошибка: не удалось загрузить данные CSV!")
-        return  # Прекращаем запуск если нет данных
+        return
     
-    # ШАГ 2: Загружаем подписки пользователей
     load_subscriptions()
+    print(f"👥 Загружено подписок: {len(subscribed_users)}")
     
-    # ШАГ 3: Планируем уведомления на сегодня
+    print("\n⏰ Планирую уведомления...")
     schedule_prayer_notifications()
     
-    # ШАГ 4: Запускаем планировщик
     scheduler.start()
     print("✅ Планировщик уведомлений запущен")
     
-    # ШАГ 5: Настраиваем ежедневное обновление в 00:01
     scheduler.add_job(
         schedule_prayer_notifications,
         CronTrigger(hour=0, minute=1, timezone=TIMEZONE),
@@ -867,20 +745,16 @@ async def on_startup():
     )
     print("✅ Ежедневное обновление настроено на 00:01")
     
+    log_notification_status()
+    
+    print("=" * 50)
     print("✅ Бот успешно запущен!")
+    print("=" * 50)
 
 async def main():
-    """
-    Основная функция запуска бота.
-    
-    Порядок выполнения:
-    1. Выполняем действия при старте
-    2. Запускаем опрос серверов Telegram
-    """
-    await on_startup()  # Выполняем startup действия
-    await dp.start_polling(bot)  # Запускаем опрос сообщений
+    """Основная функция запуска бота"""
+    await on_startup()
+    await dp.start_polling(bot)
 
-# Точка входа в программу
 if __name__ == "__main__":
-    # Запускаем бота асинхронно
     asyncio.run(main())
